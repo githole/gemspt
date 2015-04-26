@@ -13,11 +13,11 @@ namespace gemspt {
 // 球の幾何学的な情報を持つ
 class Sphere {
 private:
-    double radius;
-    Vec position;
+    double radius_;
+    Vec position_;
 public:
     Sphere(const double radius, const Vec &position) :
-      radius(radius), position(position) {}
+      radius_(radius), position_(position) {}
 
     // 入力のrayに対する交差点までの距離を得る。
     // 交差したらtrue,さもなくばfalseを返す。
@@ -25,9 +25,9 @@ public:
         // 自己交差の判定用定数。
         const double kEPS = 1e-6; 
 
-        const Vec o_to_p = position - ray.org;
+        const Vec o_to_p = position_ - ray.org;
         const double b = dot(o_to_p, ray.dir);
-        const double c = b * b - dot(o_to_p, o_to_p) + radius * radius;
+        const double c = b * b - dot(o_to_p, o_to_p) + radius_ * radius_;
 
         if (c < 0.0)
             return false;
@@ -48,7 +48,7 @@ public:
         }
 
         hitpoint->position = ray.org + hitpoint->distance * ray.dir;
-        hitpoint->normal   = normalize(hitpoint->position - position);
+        hitpoint->normal   = normalize(hitpoint->position - position_);
         return true;
     }
 };
