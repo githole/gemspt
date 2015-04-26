@@ -2,4 +2,6 @@
 Simple path tracing implementation for CGGems
 
 ## How to compile
-`g++ -O3 -fopenmp main.cpp`
+Windows `Use Visual Studio`
+
+Other OS `g++ -O3 -fopenmp main.cpp`
