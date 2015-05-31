@@ -29,7 +29,7 @@ public:
     // in, outはカメラ側から光を逆方向に追跡したときの入出方向とする。
     // 以下、in = -omega, out = omega'となる。
     virtual Color eval(const Vec &in, const Vec &normal, const Vec &out) const = 0; // BRDFとして評価した時の値。
-    virtual Vec sample(Random &random, const Vec &in, const Vec &normal, double *pdf) const = 0; // 次の反射方向をサンプリング。
+    virtual Vec sample(Random &random, const Vec &in, const Vec &normal, double *pdf, Color *brdf_value) const = 0; // 次の反射方向をサンプリング。
 };
 
 // Lambertian BRDF
@@ -45,7 +45,7 @@ public:
     }
     
     // 単純に半球一様サンプリングする。
-    virtual Vec sample(Random &random, const Vec &in, const Vec &normal, double *pdf) const {
+    virtual Vec sample(Random &random, const Vec &in, const Vec &normal, double *pdf, Color *brdf_value) const {
         Vec binormal, tangent, now_normal = normal;
 
         createOrthoNormalBasis(now_normal, &tangent, &binormal);
@@ -54,6 +54,9 @@ public:
         // pdf: 1/(2 * pi)
         if (pdf != NULL) {
             *pdf = 1.0 / (2.0 * kPI);
+        }
+        if (brdf_value != NULL) {
+            *brdf_value = eval(in, normal, dir);
         }
         return dir;
     }
@@ -73,7 +76,7 @@ public:
     }
 
     // pdfとしてcosΘ/piを使用してインポータンスサンプリングする。
-    virtual Vec sample(Random &random, const Vec &in, const Vec &normal, double *pdf) const {
+    virtual Vec sample(Random &random, const Vec &in, const Vec &normal, double *pdf, Color *brdf_value) const {
         Vec binormal, tangent, now_normal = normal;
 
         createOrthoNormalBasis(now_normal, &tangent, &binormal);
@@ -82,6 +85,9 @@ public:
         // pdf: cosΘ/pi
         if (pdf != NULL) {
             *pdf = dot(normal, dir) / kPI;
+        }
+        if (brdf_value != NULL) {
+            *brdf_value = eval(in, normal, dir);
         }
         return dir;
     }
@@ -101,7 +107,7 @@ public:
             return Color();
         }
 
-        Vec reflection_dir = reflect(in, normal);
+        const Vec reflection_dir = reflect(in, normal);
         double cosa = dot(reflection_dir, out);
         if (cosa < 0)
             cosa = 0.0;
@@ -109,9 +115,9 @@ public:
     }
 
     // BRDF形状をpdfとして使ってインポータンスサンプリングする。
-    virtual Vec sample(Random &random, const Vec &in, const Vec &normal, double *pdf) const {
+    virtual Vec sample(Random &random, const Vec &in, const Vec &normal, double *pdf, Color *brdf_value) const {
         Vec dir;
-        Vec reflection_dir = reflect(in, normal);
+        const Vec reflection_dir = reflect(in, normal);
         Vec binormal, tangent;
         createOrthoNormalBasis(reflection_dir, &tangent, &binormal);
 
@@ -124,11 +130,13 @@ public:
         dir = tangent * sin(theta) * cos(phi) + reflection_dir * cos(theta) + binormal *sin(theta) * sin(phi);
         
         if (pdf != NULL) {
-            Vec reflection_dir = reflect(in, normal);
             double cosa = dot(reflection_dir, dir);
             if (cosa < 0)
                 cosa = 0.0;
             *pdf = (n_ + 1.0) / (2.0 * kPI) * pow(cosa, n_);
+        }
+        if (brdf_value != NULL) {
+            *brdf_value = eval(in, normal, dir);
         }
 
         return dir;
@@ -147,11 +155,12 @@ public:
     // δ関数を表現することは出来ないが、モンテカルロ積分においてはpdfにもδ関数が現れるため分母と分子で打ち消し合う。
     // そこでcosΘと反射率だけ入れておく。
     // in, outはカメラ側から追跡したときの入出方向なので、光の入射方向はoutになるため、cosθは法線とoutの内積になる。
+    // 反射率や透過率（Fr,Ft）は含まれていないことに注意！
     virtual Color eval(const Vec &in, const Vec &normal, const Vec &out) const {
         return reflectance_ * DELTA / dot(normal, out);
     }
 
-    virtual Vec sample(Random &random, const Vec &in, const Vec &normal, double *pdf) const {
+    virtual Vec sample(Random &random, const Vec &in, const Vec &normal, double *pdf, Color *brdf_value) const {
         const Vec now_normal = dot(normal, in) < 0.0 ? normal: -normal; // 交差位置の法線（物体からのレイの入出を考慮。
         const bool into = dot(normal, now_normal) > 0.0; // レイがオブジェクトから出るのか、入るのか。
         const double n1 = 1.0; // 真空の屈折率
@@ -163,13 +172,17 @@ public:
         const double cos2t_2 = 1.0 - n * n * (1.0 - dir_dot_normal * dir_dot_normal);
         
         // 全反射
+        const Vec reflection_dir = reflect(in, now_normal);
         if (cos2t_2 < 0.0) {
             if (pdf != NULL) {
                 // pdfはディラックのδ関数なので実数値にはならないが、将来的にモンテカルロ積分において、
                 // 分母と分子の両方にδが表れるため結局打ち消し合うため、1でよい。あくまでδであること忘れないためにDELTAを入れておくが、実態は1。
                 *pdf = DELTA;
             }
-            return reflect(in, now_normal);
+            if (brdf_value != NULL) {
+                *brdf_value = eval(in, normal, reflection_dir);
+            }
+            return reflection_dir;
         }
 
         // 屈折の方向
@@ -192,14 +205,18 @@ public:
             if (pdf != NULL) {
                 // pdfはディラックのδ関数なので実数値にはならないが、将来的にモンテカルロ積分において、
                 // 分母と分子の両方にδが表れるため結局打ち消し合うため、1でよい。あくまでδであること忘れないためにDELTAを入れておくが、実態は1。
-                // さらに、ロシアンルーレットの確率と反射率の逆数も入れておく。
-                // すると、モンテカルロ積分はradiance(x) / pdf(x) = radiance(x) / probability * Re となり、望む式となる。屈折の場合も同様。
-                *pdf = DELTA * probability / Fr;
+                *pdf = DELTA * probability;
             }
-            return reflect(in, now_normal);
+            if (brdf_value != NULL) {
+                *brdf_value = Fr * eval(in, normal, reflection_dir);
+            }
+            return reflection_dir;
         } else { // 屈折
             if (pdf != NULL) {
-                *pdf = DELTA * (1.0f - probability) / Ft;
+                *pdf = DELTA * (1.0f - probability);
+            }
+            if (brdf_value != NULL) {
+                *brdf_value = Ft * eval(in, normal, reflection_dir);
             }
             return refraction_dir;
         }
@@ -223,7 +240,7 @@ public:
         return -1;
     }
 
-    virtual Vec sample(Random &random, const Vec &in, const Vec &normal, double *pdf) const {
+    virtual Vec sample(Random &random, const Vec &in, const Vec &normal, double *pdf, Color *brdf_value) const {
         assert(false);
         return Color();
     }

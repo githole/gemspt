@@ -35,17 +35,17 @@ Color radiance(const Ray &ray, Random &random, const int depth) {
         return emission;
     }
     
-    // 次の方向をサンプリング。
+    // 次の方向をサンプリング + その方向のBRDF項の値を得る。
     double pdf = -1;
-    const Vec dir_out = now_material->sample(random, ray.dir, hitpoint.normal, &pdf);
-    // BRDFの値。
-    const Color brdf_eval = now_material->eval(ray.dir, hitpoint.normal, dir_out);
+    Color brdf_value;
+    const Vec dir_out = now_material->sample(random, ray.dir, hitpoint.normal, &pdf, &brdf_value);
+
     // cos項。
     const double cost = dot(hitpoint.normal, dir_out);
 
     // レンダリング方程式をモンテカルロ積分によって再帰的に解く。
     const Color L = multiply(
-        brdf_eval,
+        brdf_value,
         radiance(Ray(hitpoint.position, dir_out),random, depth + 1))
         * cost / pdf;
     return L;
